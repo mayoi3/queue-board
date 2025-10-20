@@ -1,0 +1,20 @@
+{
+  "name": "com.github.mayoi3.queue-board",
+  "displayName": "Queue Board",
+  "version": "2.0.0-alpha",
+  "description": "A world gimmick that manages queue lines.",
+  "dependencies": {},
+  "gitDependencies": {},
+  "vpmDependencies": {
+    "com.vrchat.worlds": ">=3.8.1"
+  },
+  "author": {
+    "name": "mayoi",
+    "email": "239145562+mayoi3@users.noreply.github.com",
+    "url": "https://github.com/mayoi3"
+  },
+  "legacyFolders" : {
+    "Assets\\QueueBoard" : ""
+  },
+  "legacyFiles": {}
+}

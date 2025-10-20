@@ -1,0 +1,1 @@
+# com.github.mayoi3.queue-board

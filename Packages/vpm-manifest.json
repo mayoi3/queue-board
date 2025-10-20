@@ -1,1 +1,26 @@
-{"dependencies": {}, "locked": {}}
+{
+  "dependencies": {
+    "com.vrchat.worlds": {
+      "version": "3.9.0"
+    },
+    "net.narazaka.vrchat.tmp-fallback-fonts-jp": {
+      "version": "1.0.2"
+    }
+  },
+  "locked": {
+    "com.vrchat.worlds": {
+      "version": "3.9.0",
+      "dependencies": {
+        "com.vrchat.base": "3.9.0"
+      }
+    },
+    "com.vrchat.base": {
+      "version": "3.9.0",
+      "dependencies": {}
+    },
+    "net.narazaka.vrchat.tmp-fallback-fonts-jp": {
+      "version": "1.0.2",
+      "dependencies": {}
+    }
+  }
+}

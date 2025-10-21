@@ -9,6 +9,7 @@ using VRC.SDKBase;
 using TMPro;
 using VRC.Udon.Common.Interfaces;
 using VRC.SDK3.UdonNetworkCalling;
+using VRC.Udon.Common;
 
 namespace MayoiWorks.QueueBoard
 {
@@ -52,16 +53,14 @@ namespace MayoiWorks.QueueBoard
         public Button btnPending;                             // 同期待ち表示用（非操作）
 
         // ====== 同期データ ======
-        [UdonSynced] private string[] names;                   // ""=未使用, LeaveText=離脱, それ以外=表示名
-        [UdonSynced] private byte[] done;                   // 0/1（サイズ削減）
+        [UdonSynced] private short[] entries;                // 0=未使用 / 上位1bit=done, 下位15bit=playerId
         [UdonSynced] private int revision;                  // 世代カウンタ（Single-writerのみ増加）
 
         // ====== ローカル ======
         private const int PageSize = 10;
         private int offset = 0;                                // 10刻み（ページ先頭インデックス）
         // 表示用のワーキングコピー（古い受信をUIに反映しない）
-        private string[] viewNames;
-        private byte[] viewDone;
+        private short[] viewEntries;
         private int localRevision = -1;
         private bool pendingAutoGoLast = false;               // 自分がJoinを要求した直後の自動ページ送り用フラグ
         private int pendingAction = 0;                        // 0=なし, 1=Join, 2=Leave
@@ -89,7 +88,7 @@ namespace MayoiWorks.QueueBoard
 
         public override void OnDeserialization()
         {
-            // 同期変数(names/done/revision)は既に適用済み。このタイミングでUI用に採用可否を判定
+            // 同期変数(entries/revision)は既に適用済み。このタイミングでUI用に採用可否を判定
             if (revision >= localRevision)
             {
                 localRevision = revision;
@@ -115,14 +114,12 @@ namespace MayoiWorks.QueueBoard
         // ====== 内部ユーティリティ ======
         private void EnsureArrays()
         {
-            if (names == null || names.Length != Max) names = new string[Max];
-            if (done == null || done.Length != Max) done = new byte[Max];
+            if (entries == null || entries.Length != Max) entries = new short[Max];
         }
 
         private void EnsureViewArrays()
         {
-            if (viewNames == null || viewNames.Length != Max) viewNames = new string[Max];
-            if (viewDone == null || viewDone.Length != Max) viewDone = new byte[Max];
+            if (viewEntries == null || viewEntries.Length != Max) viewEntries = new short[Max];
         }
 
         private void CopyToView()
@@ -131,86 +128,73 @@ namespace MayoiWorks.QueueBoard
             EnsureViewArrays();
             for (int i = 0; i < Max; i++)
             {
-                viewNames[i] = names[i];
-                viewDone[i] = done[i];
+                viewEntries[i] = entries[i];
             }
         }
 
         private bool ArraysReady()
         {
-            return names != null && done != null && names.Length == Max && done.Length == Max;
+            return entries != null && entries.Length == Max;
         }
 
         private int LastUsedIndex()
         {
-            if (names == null) return -1;
-            for (int i = names.Length - 1; i >= 0; i--)
-                if (!string.IsNullOrEmpty(names[i])) return i; // LeaveText も「使用中」
+            if (entries == null) return -1;
+            for (int i = entries.Length - 1; i >= 0; i--)
+                if (entries[i] != 0) return i;
             return -1;
         }
 
         private int LastUsedIndexView()
         {
-            if (viewNames == null) return -1;
-            for (int i = viewNames.Length - 1; i >= 0; i--)
-                if (!string.IsNullOrEmpty(viewNames[i])) return i;
+            if (viewEntries == null) return -1;
+            for (int i = viewEntries.Length - 1; i >= 0; i--)
+                if (viewEntries[i] != 0) return i;
             return -1;
         }
 
-        
-
-        // トランケート前後のいずれかで一致するインデックスを返す（names配列）
-        private int FindByDisplayNameAny(string original)
+        // entries から playerId を探索
+        private int FindByPlayerId(int playerId)
         {
-            if (names == null || string.IsNullOrEmpty(original)) return -1;
-            // 完全一致を優先
-            for (int i = 0; i < names.Length; i++)
-                if (names[i] == original) return i;
-            // 短縮名でも照合
-            string truncated = TruncateUtf8(original, MaxDisplayNameUtf8Bytes, TruncateSuffix);
-            if (truncated == original) return -1;
-            for (int i = 0; i < names.Length; i++)
-                if (names[i] == truncated) return i;
+            if (entries == null || playerId <= 0) return -1;
+            int pid = MaskPid(playerId);
+            for (int i = 0; i < entries.Length; i++)
+            {
+                short e = entries[i];
+                if (e == 0) continue;
+                if (GetPid(e) == pid) return i;
+            }
             return -1;
         }
 
-        // トランケート前後のいずれかで一致するインデックスを返す（viewNames配列）
-        private int FindByDisplayNameAnyView(string original)
+        private int FindByPlayerIdView(int playerId)
         {
-            if (viewNames == null || string.IsNullOrEmpty(original)) return -1;
-            for (int i = 0; i < viewNames.Length; i++)
-                if (viewNames[i] == original) return i;
-            string truncated = TruncateUtf8(original, MaxDisplayNameUtf8Bytes, TruncateSuffix);
-            if (truncated == original) return -1;
-            for (int i = 0; i < viewNames.Length; i++)
-                if (viewNames[i] == truncated) return i;
+            if (viewEntries == null || playerId <= 0) return -1;
+            int pid = MaskPid(playerId);
+            for (int i = 0; i < viewEntries.Length; i++)
+            {
+                short e = viewEntries[i];
+                if (e == 0) continue;
+                if (GetPid(e) == pid) return i;
+            }
             return -1;
         }
 
-        // 表示名が現在Join済み（LeaveTextではない）とみなせるか
-        private bool IsJoinedViewByDisplayName(string original)
+        private bool IsJoinedViewByPlayerId(int playerId)
         {
-            int ix = FindByDisplayNameAnyView(original);
-            if (ix == -1) return false;
-            string v = viewNames[ix];
-            return !string.IsNullOrEmpty(v) && v != LeaveText;
+            return FindByPlayerIdView(playerId) != -1;
         }
 
-        // Join済みならそのインデックス（0-based）、未登録やLeaveなら -1
-        private int GetJoinedIndexViewByDisplayName(string original)
+        private int GetJoinedIndexViewByPlayerId(int playerId)
         {
-            int ix = FindByDisplayNameAnyView(original);
-            if (ix == -1) return -1;
-            string v = viewNames[ix];
-            if (string.IsNullOrEmpty(v) || v == LeaveText) return -1;
-            return ix;
+            return FindByPlayerIdView(playerId);
         }
 
         private int FindAppendRow()
         {
             int last = LastUsedIndex();
             int next = last + 1;
-            return (names != null && next < names.Length) ? next : -1;
+            return (entries != null && next < entries.Length) ? next : -1;
         }
 
         private void Sync()
@@ -310,23 +294,23 @@ namespace MayoiWorks.QueueBoard
         public void BtnJoin()
         {
             VRCPlayerApi lp = Networking.LocalPlayer; if (lp == null) return;
-            string me = lp.displayName;
-            if (IsJoinedViewByDisplayName(me)) { RefreshUI(); return; }
+            int mePid = lp.playerId;
+            if (IsJoinedViewByPlayerId(mePid)) { RefreshUI(); return; }
             if (AutoGoLastPageOnJoin) pendingAutoGoLast = true;
             pendingAction = 1;
             pendingSince = Time.time;
             RefreshUI(); // 即時にpending表示
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqJoin), me);
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqJoin), mePid);
         }
 
         public void BtnLeave()
         {
             VRCPlayerApi lp = Networking.LocalPlayer; if (lp == null) return;
-            string me = lp.displayName;
+            int mePid = lp.playerId;
             pendingAction = 2;
             pendingSince = Time.time;
             RefreshUI(); // 即時にpending表示
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqLeave), me);
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqLeave), mePid);
         }
 
         public void BtnPagePrev()
@@ -353,7 +337,7 @@ namespace MayoiWorks.QueueBoard
             int i = offset + slot;
             int last = LastUsedIndexView();
             if (i > last) return;
-            if (viewNames == null || string.IsNullOrEmpty(viewNames[i])) return;
+            if (viewEntries == null || viewEntries[i] == 0) return;
             SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqToggle), i + 1);
         }
 
@@ -365,8 +349,8 @@ namespace MayoiWorks.QueueBoard
             {
                 bool ready = ArraysReady();
                 VRCPlayerApi lp = Networking.LocalPlayer;
-                string me = (lp == null) ? "" : lp.displayName;
-                bool joined = ready && me != "" && IsJoinedViewByDisplayName(me);
+                int mePid = (lp == null) ? 0 : lp.playerId;
+                bool joined = ready && mePid > 0 && IsJoinedViewByPlayerId(mePid);
                 bool isPending = (pendingAction != 0);
 
                 if (btnPending) { btnPending.gameObject.SetActive(isPending); if (btnPending) btnPending.interactable = false; }
@@ -375,13 +359,13 @@ namespace MayoiWorks.QueueBoard
 
                 if (yourNumberText)
                 {
-                    if (!ready || me == "")
+                    if (!ready || mePid == 0)
                     {
                         yourNumberText.text = "";
                     }
                     else
                     {
-                        int ix = GetJoinedIndexViewByDisplayName(me);
+                        int ix = GetJoinedIndexViewByPlayerId(mePid);
                         yourNumberText.text = (ix == -1) ? "" : ("あなたの番号: #" + (ix + 1));
                     }
                 }
@@ -414,18 +398,22 @@ namespace MayoiWorks.QueueBoard
             {
                 int i = offset + slot;
 
-                if (i > lastIdx || string.IsNullOrEmpty(viewNames[i]))
+                if (i > lastIdx || viewEntries[i] == 0)
                 {
                     SetRow(slot, false, false, 0, false, "", false);
                     continue;
                 }
 
-                bool isLeave = (viewNames[i] == LeaveText);
-                bool isDone = (viewDone[i] == 1);
+                short e = viewEntries[i];
+                bool isLeave = IsLeaveEntry(e);
+                bool isDone = IsDone(e);
+                int pid = GetPid(e);
+                VRCPlayerApi p = VRCPlayerApi.GetPlayerById(pid);
+                string disp = isLeave ? LeaveText : ((p == null) ? "" : p.displayName);
                 bool isOwner = Networking.IsOwner(gameObject);
                 bool isPending = (pendingAction != 0);
                 bool rowsInteractable = isOwner || !isPending; // 非オーナーは自分がpendingの間は行操作不可
-                SetRow(slot, true, rowsInteractable, i + 1, isDone, viewNames[i], isLeave);
+                SetRow(slot, true, rowsInteractable, i + 1, isDone, disp, isLeave);
             }
         }
 
@@ -433,34 +421,70 @@ namespace MayoiWorks.QueueBoard
         {
             // Join完了後の自動最終ページ移動と保留解除
             VRCPlayerApi lp = Networking.LocalPlayer; if (lp == null) return;
-            string me = lp.displayName;
-            if (pendingAutoGoLast && IsJoinedViewByDisplayName(me))
+            int mePid = lp.playerId;
+            if (pendingAutoGoLast && IsJoinedViewByPlayerId(mePid))
             {
                 int last = LastUsedIndexView();
                 offset = (last / PageSize) * PageSize;
                 pendingAutoGoLast = false;
             }
-            if (pendingAction == 1 && IsJoinedViewByDisplayName(me)) pendingAction = 0; // Join反映
-            if (pendingAction == 2 && !IsJoinedViewByDisplayName(me)) pendingAction = 0; // Leave反映
+            if (pendingAction == 1 && IsJoinedViewByPlayerId(mePid)) pendingAction = 0; // Join反映
+            if (pendingAction == 2 && !IsJoinedViewByPlayerId(mePid)) pendingAction = 0; // Leave反映
+        }
+
+        public override void OnPostSerialization(SerializationResult result)
+        {
+            // ネットワーク送信後（試行後）の実バイト数と成功可否のみを出力
+            Debug.Log("[QueueBoard] OnPostSerialization: success=" + (result.success ? "true" : "false") + ", bytes=" + result.byteCount);
         }
 
         // ====== Owner-side handlers (Single-writer) ======
-        private int MaxDisplayNameUtf8Bytes = 32;
-        private string TruncateSuffix = "…";
+        private const short DoneMask = (short)-32768; // bit15
+        private const short LeavePid = (short)0x7FFF; // 下位15bitの全ビット=1 を離脱PIDとして予約
+
+        private bool IsDone(short entry)
+        {
+            return (entry & DoneMask) != 0;
+        }
+
+        private bool IsLeaveEntry(short entry)
+        {
+            return GetPid(entry) == LeavePid;
+        }
+
+        private short MakeEntry(int playerId, bool doneFlag)
+        {
+            int pid = MaskPid(playerId);
+            return (short)(pid | (doneFlag ? DoneMask : (short)0));
+        }
+
+        private int GetPid(short entry)
+        {
+            return entry & 0x7FFF;
+        }
+
+        private int MaskPid(int playerId)
+        {
+            return playerId & 0x7FFF;
+        }
+
+        private short ToggleDone(short entry)
+        {
+            return (short)(entry ^ DoneMask);
+        }
 
         [NetworkCallable]
-        public void ReqJoin(string displayName)
+        public void ReqJoin(int playerId)
         {
             if (!Networking.IsOwner(gameObject)) return;
-            if (string.IsNullOrEmpty(displayName)) return;
+            if (playerId <= 0) return;
             EnsureArrays();
 
-            // 既にJoin済み（短縮後含む）なら何もしない
-            if (FindByDisplayNameAny(displayName) != -1) return;
+            // 既にJoin済みなら何もしない
+            if (FindByPlayerId(playerId) != -1) return;
             int row = FindAppendRow(); if (row == -1) return;
 
-            names[row] = TruncateUtf8(displayName, MaxDisplayNameUtf8Bytes, TruncateSuffix);
-            done[row] = 0;
+            entries[row] = MakeEntry(playerId, false);
             Sync();
             // Owner: 楽観的に即時UI反映（ネットワーク送信はデバウンスで後追い）
             CopyToView();
@@ -468,40 +492,17 @@ namespace MayoiWorks.QueueBoard
             RefreshUI();
         }
 
-        private string TruncateUtf8(string s, int maxBytes, string suffix)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            if (maxBytes <= 0) return s;
-            var enc = System.Text.Encoding.UTF8;
-            int total = enc.GetByteCount(s);
-            if (total <= maxBytes) return s;
-            int suffixBytes = string.IsNullOrEmpty(suffix) ? 0 : enc.GetByteCount(suffix);
-            int budget = Mathf.Max(0, maxBytes - suffixBytes);
-            int len = s.Length;
-            int end = 0;
-            for (int i = 0; i < len; i++)
-            {
-                int next = i + 1;
-                if (char.IsHighSurrogate(s[i]) && next < len && char.IsLowSurrogate(s[next])) next++;
-                int bytes = enc.GetByteCount(s.Substring(0, next));
-                if (bytes > budget) break;
-                end = next;
-                i = next - 1;
-            }
-            if (end <= 0) return string.IsNullOrEmpty(suffix) ? string.Empty : suffix;
-            return string.IsNullOrEmpty(suffix) ? s.Substring(0, end) : (s.Substring(0, end) + suffix);
-        }
-
         [NetworkCallable]
-        public void ReqLeave(string displayName)
+        public void ReqLeave(int playerId)
         {
             if (!Networking.IsOwner(gameObject)) return;
-            if (string.IsNullOrEmpty(displayName)) return;
+            if (playerId <= 0) return;
             EnsureArrays();
 
-            // 短縮後を含めて対象行を特定
-            int ix = FindByDisplayNameAny(displayName); if (ix == -1) return;
-            names[ix] = LeaveText; // done は触らない
+            int ix = FindByPlayerId(playerId); if (ix == -1) return;
+            // 離脱マーカーへ置換（done状態は維持）
+            bool d = IsDone(entries[ix]);
+            entries[ix] = MakeEntry(LeavePid, d);
             Sync();
             // Owner: 楽観的に即時UI反映
             CopyToView();
@@ -516,10 +517,24 @@ namespace MayoiWorks.QueueBoard
             EnsureArrays();
             int i = index1Based - 1;
             if (i < 0 || i >= Max) return;
-            if (string.IsNullOrEmpty(names[i])) return;
-            done[i] = (byte)(done[i] == 0 ? 1 : 0);
+            if (entries[i] == 0) return;
+            entries[i] = ToggleDone(entries[i]);
             Sync();
             // Owner: 楽観的に即時UI反映
+            CopyToView();
+            RefreshUI();
+        }
+
+        public override void OnPlayerLeft(VRCPlayerApi player)
+        {
+            if (!Networking.IsOwner(gameObject)) return;
+            if (player == null) return;
+            EnsureArrays();
+            int ix = FindByPlayerId(player.playerId);
+            if (ix == -1) return;
+            bool d = IsDone(entries[ix]);
+            entries[ix] = MakeEntry(LeavePid, d); // 左詰めせず、離脱マーカー
+            Sync();
             CopyToView();
             RefreshUI();
         }

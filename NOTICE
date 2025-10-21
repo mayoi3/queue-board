@@ -1,0 +1,16 @@
+This repository contains a mix of original works by mayoi3 and files derived
+from the GitHub template "vrchat-community/template-package".
+
+Licensing:
+- Original works by mayoi3 are released under CC0 1.0 Universal.
+  See: LICENSE-CC0 (CC0 1.0 Legal Code).
+  Scope:
+    /Packages/com.github.mayoi3.queue-board/**
+    /CHANGELOG.md
+
+- Files derived from vrchat-community/template-package and any included
+  GitHub Actions or build scripts retain their original licenses and notices.
+  Where the original license is unknown, we mark it as NOASSERTION and provide
+  upstream reference: https://github.com/vrchat-community/template-package
+
+If you find a file mis-labeled, please open an issue.

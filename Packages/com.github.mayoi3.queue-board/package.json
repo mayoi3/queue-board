@@ -5,7 +5,6 @@
   "description": "A world gimmick that manages queue lines.",
   "unity": "2022.3",
   "changelogUrl": "https://github.com/mayoi3/queue-board/blob/main/CHANGELOG.md",
-  "licensesUrl": "https://github.com/mayoi3/queue-board/blob/main/LICENSE-CC0",
   "dependencies": {},
   "gitDependencies": {},
   "vpmDependencies": {

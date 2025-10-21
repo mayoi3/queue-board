@@ -1,7 +1,7 @@
 {
   "name": "com.github.mayoi3.queue-board",
   "displayName": "Queue Board",
-  "version": "2.1.0-alpha2",
+  "version": "2.1.0-alpha3",
   "description": "A world gimmick that manages queue lines.",
   "unity": "2022.3",
   "changelogUrl": "https://github.com/mayoi3/queue-board/blob/main/CHANGELOG.md",

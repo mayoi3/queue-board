@@ -525,6 +525,16 @@ namespace MayoiWorks.QueueBoard
             RefreshUI();
         }
 
+        public override void OnPlayerJoined(VRCPlayerApi player)
+        {
+            if (player == null)
+            {
+                Debug.Log("[QueueBoard] OnPlayerJoined: player is null");
+                return;
+            }
+            Debug.Log("[QueueBoard] OnPlayerJoined: playerId=" + player.playerId + ", name=" + player.displayName);
+        }
+
         public override void OnPlayerLeft(VRCPlayerApi player)
         {
             if (!Networking.IsOwner(gameObject)) return;

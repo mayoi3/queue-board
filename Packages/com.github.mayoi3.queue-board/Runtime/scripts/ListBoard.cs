@@ -300,7 +300,7 @@ namespace MayoiWorks.QueueBoard
             pendingAction = 1;
             pendingSince = Time.time;
             RefreshUI(); // 即時にpending表示
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqJoin), mePid);
+			SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqJoin));
         }
 
         public void BtnLeave()
@@ -310,7 +310,7 @@ namespace MayoiWorks.QueueBoard
             pendingAction = 2;
             pendingSince = Time.time;
             RefreshUI(); // 即時にpending表示
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqLeave), mePid);
+			SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(ReqLeave));
         }
 
         public void BtnPagePrev()
@@ -473,42 +473,48 @@ namespace MayoiWorks.QueueBoard
             return (short)(entry ^ DoneMask);
         }
 
-        [NetworkCallable]
-        public void ReqJoin(int playerId)
-        {
-            if (!Networking.IsOwner(gameObject)) return;
-            if (playerId <= 0) return;
-            EnsureArrays();
+		[NetworkCallable]
+		public void ReqJoin()
+		{
+			if (!Networking.IsOwner(gameObject)) return;
+			VRCPlayerApi caller = NetworkCalling.CallingPlayer;
+			if (caller == null) return;
+			int playerId = caller.playerId;
+			if (playerId <= 0) return;
+			EnsureArrays();
 
-            // 既にJoin済みなら何もしない
-            if (FindByPlayerId(playerId) != -1) return;
-            int row = FindAppendRow(); if (row == -1) return;
+			// 既にJoin済みなら何もしない
+			if (FindByPlayerId(playerId) != -1) return;
+			int row = FindAppendRow(); if (row == -1) return;
 
-            entries[row] = MakeEntry(playerId, false);
-            Sync();
-            // Owner: 楽観的に即時UI反映（ネットワーク送信はデバウンスで後追い）
-            CopyToView();
-            ApplyPostReceiveLocalEffects();
-            RefreshUI();
-        }
+			entries[row] = MakeEntry(playerId, false);
+			Sync();
+			// Owner: 楽観的に即時UI反映（ネットワーク送信はデバウンスで後追い）
+			CopyToView();
+			ApplyPostReceiveLocalEffects();
+			RefreshUI();
+		}
 
-        [NetworkCallable]
-        public void ReqLeave(int playerId)
-        {
-            if (!Networking.IsOwner(gameObject)) return;
-            if (playerId <= 0) return;
-            EnsureArrays();
+		[NetworkCallable]
+		public void ReqLeave()
+		{
+			if (!Networking.IsOwner(gameObject)) return;
+			VRCPlayerApi caller = NetworkCalling.CallingPlayer;
+			if (caller == null) return;
+			int playerId = caller.playerId;
+			if (playerId <= 0) return;
+			EnsureArrays();
 
-            int ix = FindByPlayerId(playerId); if (ix == -1) return;
-            // 離脱マーカーへ置換（done状態は維持）
-            bool d = IsDone(entries[ix]);
-            entries[ix] = MakeEntry(LeavePid, d);
-            Sync();
-            // Owner: 楽観的に即時UI反映
-            CopyToView();
-            ApplyPostReceiveLocalEffects();
-            RefreshUI();
-        }
+			int ix = FindByPlayerId(playerId); if (ix == -1) return;
+			// 離脱マーカーへ置換（done状態は維持）
+			bool d = IsDone(entries[ix]);
+			entries[ix] = MakeEntry(LeavePid, d);
+			Sync();
+			// Owner: 楽観的に即時UI反映
+			CopyToView();
+			ApplyPostReceiveLocalEffects();
+			RefreshUI();
+		}
 
         [NetworkCallable]
         public void ReqToggle(int index1Based)

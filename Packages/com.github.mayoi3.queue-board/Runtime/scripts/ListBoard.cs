@@ -67,10 +67,15 @@ namespace MayoiWorks.QueueBoard
         private float pendingTimeoutSeconds = 5f;              // ローディングの自動解除秒数（0以下で無効）
         private float pendingSince = 0f;
 
-        // 送信デバウンス
-        private float sendDebounceSeconds = 0.25f;
+		// 送信デバウンス
+		private const float MinSendDebounceSecondsConst = 0.25f;
+		private const float MaxSendDebounceSecondsConst = 5f;
+		private const float BackoffIncreaseFactorConst = 1.5f;
+		private const float RecoveryDecreaseSecondsConst = 0.5f;
+
+		private float sendDebounceSeconds = MinSendDebounceSecondsConst;
         private bool dirtyQueued = false;
-        private float nextSendAt = 0f;
+		private float nextSendAt = 0f;
 
         // ====== ライフサイクル ======
         void Start()
@@ -202,9 +207,24 @@ namespace MayoiWorks.QueueBoard
             // 直接即送信は行わず、オーナーでのみデバウンス送信
             if (!Networking.IsOwner(gameObject)) return;
             dirtyQueued = true;
-            float now = Time.time;
-            if (nextSendAt < now)
-                nextSendAt = now + sendDebounceSeconds;
+			float now = Time.time;
+			// 混雑状態に基づく送信デバウンス調整
+			if (Networking.IsClogged)
+			{
+				// 混雑中はデバウンスを穏やかに増加
+				sendDebounceSeconds = Mathf.Min(MaxSendDebounceSecondsConst, sendDebounceSeconds * BackoffIncreaseFactorConst);
+                Debug.Log("[QueueBoard] Sync: is clogged, sendDebounceSeconds=" + sendDebounceSeconds);
+			}
+			else
+			{
+				// 非混雑なら少しずつ回復
+				sendDebounceSeconds = Mathf.Max(MinSendDebounceSecondsConst, sendDebounceSeconds - RecoveryDecreaseSecondsConst);
+                if (sendDebounceSeconds > MinSendDebounceSecondsConst) {
+                    Debug.Log("[QueueBoard] Sync: is not clogged, recovery to normal, sendDebounceSeconds=" + sendDebounceSeconds);
+                }
+			}
+			if (nextSendAt < now)
+				nextSendAt = now + sendDebounceSeconds;
         }
 
         void Update()
@@ -435,7 +455,7 @@ namespace MayoiWorks.QueueBoard
         public override void OnPostSerialization(SerializationResult result)
         {
             // ネットワーク送信後（試行後）の実バイト数と成功可否のみを出力
-            Debug.Log("[QueueBoard] OnPostSerialization: success=" + (result.success ? "true" : "false") + ", bytes=" + result.byteCount);
+			Debug.Log("[QueueBoard] OnPostSerialization: success=" + (result.success ? "true" : "false") + ", bytes=" + result.byteCount);
         }
 
         // ====== Owner-side handlers (Single-writer) ======

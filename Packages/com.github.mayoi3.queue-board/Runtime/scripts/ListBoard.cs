@@ -429,7 +429,8 @@ namespace MayoiWorks.QueueBoard
                 bool isDone = IsDone(e);
                 int pid = GetPid(e);
                 VRCPlayerApi p = VRCPlayerApi.GetPlayerById(pid);
-                string disp = isLeave ? LeaveText : ((p == null) ? "" : p.displayName);
+                // 退出済みプレイヤー(p==null)もLeaveTextで表示（不整合状態のフォールバック）
+                string disp = (isLeave || p == null) ? LeaveText : p.displayName;
                 bool isOwner = Networking.IsOwner(gameObject);
                 bool isPending = (pendingAction != 0);
                 bool rowsInteractable = isOwner || !isPending; // 非オーナーは自分がpendingの間は行操作不可

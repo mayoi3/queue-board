@@ -19,6 +19,8 @@ namespace MayoiWorks.QueueBoard
         public int Max = 100;                                 // 上限100
         [Tooltip("離脱行の表示文言")]
         public string LeaveText = "[列から抜けました]";
+        [Tooltip("同期待ち中の表示文言")]
+        public string SyncPendingText = "[同期待ち中...]";
         [Tooltip("Join後に自動で最終ページへ移動")]
         public bool AutoGoLastPageOnJoin = true;
 
@@ -69,7 +71,6 @@ namespace MayoiWorks.QueueBoard
         private float pendingTimeoutSeconds = 5f;              // ローディングの自動解除秒数（0以下で無効）
         private float pendingSince = 0f;
 
-        // 送信デバウンス
         private float sendDebounceSeconds = 0.25f;
         private bool dirtyQueued = false;
         private float nextSendAt = 0f;
@@ -81,7 +82,8 @@ namespace MayoiWorks.QueueBoard
             if (Networking.IsOwner(gameObject))
             {
                 EnsureArrays();
-                // 初期オーナーのみ必要最小限。即送信はしない
+                // 初期オーナーのみ1回だけRequestSerialization
+                RequestSerialization();
             }
             EnsureViewArrays();
             CopyToView();
@@ -424,18 +426,29 @@ namespace MayoiWorks.QueueBoard
             {
                 int i = offset + slot;
 
-                if (i > lastIdx || string.IsNullOrEmpty(viewNames[i]))
+                if (i > lastIdx)
                 {
                     SetRow(slot, false, false, 0, false, "", false);
                     continue;
                 }
 
-                bool isLeave = (viewNames[i] == LeaveText);
+                // 歯抜け判定：末尾より前なのに名前が空 = 同期待ち中
+                bool isSyncPending = (i < lastIdx && string.IsNullOrEmpty(viewNames[i]));
+                
+                if (string.IsNullOrEmpty(viewNames[i]) && !isSyncPending)
+                {
+                    // 末尾かつ空 = データなし
+                    SetRow(slot, false, false, 0, false, "", false);
+                    continue;
+                }
+
+                string displayName = isSyncPending ? SyncPendingText : viewNames[i];
+                bool isLeave = (!isSyncPending && viewNames[i] == LeaveText);
                 bool isDone = (viewDone[i] == 1);
                 bool isOwner = Networking.IsOwner(gameObject);
                 bool isPending = (pendingAction != 0);
                 bool rowsInteractable = isOwner || !isPending; // 非オーナーは自分がpendingの間は行操作不可
-                SetRow(slot, true, rowsInteractable, i + 1, isDone, viewNames[i], isLeave);
+                SetRow(slot, true, rowsInteractable, i + 1, isDone, displayName, isLeave);
             }
         }
 

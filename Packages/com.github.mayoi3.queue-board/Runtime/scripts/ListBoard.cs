@@ -15,7 +15,7 @@ namespace MayoiWorks.QueueBoard
     [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
     public class ListBoard : UdonSharpBehaviour
     {
-        private const string VERSION = "2.1.0-beta1";
+        private const string VERSION = "2.1.0";
 
         [Header("Config")]
         public int Max = 100;                                 // 上限100

@@ -15,6 +15,8 @@ namespace MayoiWorks.QueueBoard
     [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
     public class ListBoard : UdonSharpBehaviour
     {
+        private const string VERSION = "2.1.0-beta1";
+
         [Header("Config")]
         public int Max = 100;                                 // 上限100
         [Tooltip("離脱行の表示文言")]
@@ -37,6 +39,9 @@ namespace MayoiWorks.QueueBoard
 
         [Header("UI: Help")]
         public GameObject helpPanel; // 説明文のGameObject（同期不要・ローカル表示）
+
+        [Header("UI: Debug")]
+        public TextMeshProUGUI debugText; // デバッグ情報表示用（任意）
 
         [Header("Checkbox Sprites (optional)")]
         public Sprite checkOnSprite;                           // ✓用
@@ -75,6 +80,16 @@ namespace MayoiWorks.QueueBoard
         private bool dirtyQueued = false;
         private float nextSendAt = 0f;
 
+        // ====== デバッグ情報追跡 ======
+        private float lastUdonSyncedDelay = 0f;              // 最後のUdonSynced遅延（秒）
+        private short lastReceivedRevision = 0;              // 最後に受信したrevision
+        private int udonSyncedDropCount = 0;                 // UdonSyncedドロップ回数
+        private int udonSyncedReceiveCount = 0;              // UdonSynced受信回数
+        private short lastReceivedEventRevision = 0;         // 最後に受信したイベントrevision
+        private int eventDropCount = 0;                      // イベントドロップ回数
+        private int eventReceiveCount = 0;                   // イベント受信回数
+        private float lastEventDelay = 0f;                   // 最後のイベント遅延（秒）
+
         // ====== ライフサイクル ======
         void Start()
         {
@@ -88,14 +103,31 @@ namespace MayoiWorks.QueueBoard
             EnsureViewArrays();
             CopyToView();
             RefreshUI();
+            UpdateDebugDisplay();
         }
 
-        public override void OnDeserialization()
+        public override void OnDeserialization(VRC.Udon.Common.DeserializationResult result)
         {
             // 同期変数(names/done/revision)は既に適用済み
             // 各セルについて、UdonSyncedの方が新しければ採用
             EnsureArrays();
             EnsureViewArrays();
+            
+            // デバッグ：UdonSynced遅延計算
+            lastUdonSyncedDelay = Time.realtimeSinceStartup - result.sendTime;
+            
+            // デバッグ：UdonSyncedドロップレート計算
+            if (lastReceivedRevision > 0)
+            {
+                short expectedRevision = (short)(lastReceivedRevision + 1);
+                short gap = (short)(revision - expectedRevision);
+                if (gap > 0)
+                {
+                    udonSyncedDropCount += gap;
+                }
+            }
+            lastReceivedRevision = revision;
+            udonSyncedReceiveCount++;
             
             for (int i = 0; i < Max; i++)
             {
@@ -450,6 +482,9 @@ namespace MayoiWorks.QueueBoard
                 bool rowsInteractable = isOwner || !isPending; // 非オーナーは自分がpendingの間は行操作不可
                 SetRow(slot, true, rowsInteractable, i + 1, isDone, displayName, isLeave);
             }
+            
+            // デバッグ表示更新
+            UpdateDebugDisplay();
         }
 
         private void ApplyPostReceiveLocalEffects()
@@ -474,22 +509,25 @@ namespace MayoiWorks.QueueBoard
         // イベント送信ヘルパー（Join操作）
         private void BroadcastJoin(int index, int playerId, short rev)
         {
+            int sendTimeMs = Networking.GetServerTimeInMilliseconds();
             SendCustomNetworkEvent(NetworkEventTarget.Others, nameof(OnBoardUpdateCell), 
-                (short)index, playerId, (byte)0, rev);
+                (short)index, playerId, (byte)0, rev, sendTimeMs);
         }
 
         // イベント送信ヘルパー（Leave操作）
         private void BroadcastLeave(int index, short rev)
         {
+            int sendTimeMs = Networking.GetServerTimeInMilliseconds();
             SendCustomNetworkEvent(NetworkEventTarget.Others, nameof(OnBoardUpdateCell), 
-                (short)index, -1, (byte)0, rev);
+                (short)index, -1, (byte)0, rev, sendTimeMs);
         }
 
         // イベント送信ヘルパー（Toggle操作）
         private void BroadcastToggle(int index, byte newDone, short rev)
         {
+            int sendTimeMs = Networking.GetServerTimeInMilliseconds();
             SendCustomNetworkEvent(NetworkEventTarget.Others, nameof(OnBoardUpdateCell), 
-                (short)index, 0, newDone, rev);
+                (short)index, 0, newDone, rev, sendTimeMs);
         }
 
         [NetworkCallable]
@@ -602,10 +640,28 @@ namespace MayoiWorks.QueueBoard
 
         // ====== イベント受信ハンドラ ======
         [NetworkCallable]
-        public void OnBoardUpdateCell(short index, int playerId, byte done, short eventRevision)
+        public void OnBoardUpdateCell(short index, int playerId, byte done, short eventRevision, int sendTimeMs)
         {
             // Ownerは自身で既に更新済み
             if (Networking.IsOwner(gameObject)) return;
+            
+            // デバッグ：イベント遅延計算
+            double currentTime = (double)Networking.GetServerTimeInMilliseconds() / 1000.0;
+            double sendTime = (double)sendTimeMs / 1000.0;
+            lastEventDelay = (float)Networking.CalculateServerDeltaTime(currentTime, sendTime);
+            
+            // デバッグ：イベントドロップレート計算
+            if (lastReceivedEventRevision > 0)
+            {
+                short expectedRevision = (short)(lastReceivedEventRevision + 1);
+                short gap = (short)(eventRevision - expectedRevision);
+                if (gap > 0)
+                {
+                    eventDropCount += gap;
+                }
+            }
+            lastReceivedEventRevision = eventRevision;
+            eventReceiveCount++;
             
             EnsureViewArrays();
             if (index < 0 || index >= Max) return;
@@ -704,6 +760,40 @@ namespace MayoiWorks.QueueBoard
         public void BtnHelpToggle()
         {
             if (helpPanel != null) helpPanel.SetActive(!helpPanel.activeSelf);
+        }
+
+        // ====== デバッグ表示 ======
+        private void UpdateDebugDisplay()
+        {
+            if (debugText == null) return;
+            
+            VRCPlayerApi owner = Networking.GetOwner(gameObject);
+            string ownerName = owner != null ? owner.displayName : "None";
+            
+            // UdonSyncedドロップレート計算
+            float udonSyncedDropRate = 0f;
+            if (udonSyncedReceiveCount > 0)
+            {
+                udonSyncedDropRate = (float)udonSyncedDropCount / (udonSyncedReceiveCount + udonSyncedDropCount);
+            }
+            
+            // イベントドロップレート計算
+            float eventDropRate = 0f;
+            if (eventReceiveCount > 0)
+            {
+                eventDropRate = (float)eventDropCount / (eventReceiveCount + eventDropCount);
+            }
+            
+            // Suffering取得
+            float suffering = VRC.SDK3.Network.Stats.Suffering;
+                        
+            // デバッグ情報を組み立て
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[Debug Info] Version: {VERSION}");
+            sb.AppendLine($"Owner: {ownerName}, Suff: {suffering:F0}, EVQ: {NetworkCalling.GetAllQueuedEvents()}");            
+            sb.AppendLine($"US Delay: {lastUdonSyncedDelay:F0}s, DropRate: {udonSyncedDropRate:P1}");
+            sb.AppendLine($"EV Delay: {lastEventDelay:F0}s, DropRate: {eventDropRate:P1}");            
+            debugText.text = sb.ToString();
         }
     }
 }
